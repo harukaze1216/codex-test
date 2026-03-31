@@ -1,9 +1,26 @@
-# CLAUDE.md - Claude Code Issue対応ルール
+# CLAUDE.md - Claude Code Issue自動巡回ルール
 
 ## プロジェクト概要
 
 1人運営SaaSの顧客対応を全自動化するシステム。
-GitHub Actionsからissue登録時にClaude Codeが起動し、自動で分類・修正・PR作成を行う。
+このリポジトリが **中央ハブ** として、複数リポジトリのissueを巡回・自動処理する。
+
+## アーキテクチャ
+
+```
+このリポジトリ（codex-test）= 中央ハブ
+├── repos.json           ← 管理対象リポジトリ一覧＋分類ルール
+├── BACKLOG.md           ← 全リポジトリの機能要望を一元管理
+├── .github/workflows/
+│   ├── poll-issues.yml  ← cron 5分ごとに Claude Code が巡回
+│   └── notify-on-close.yml
+└── src/                 ← Webアプリ（チャットbot・フィードバック等）
+
+管理対象リポジトリ（何も置かなくてOK）
+├── product-a/  ← issueが立つとClaude Codeが取りに来る
+├── product-b/
+└── ...
+```
 
 ## 技術スタック
 
@@ -12,7 +29,7 @@ GitHub Actionsからissue登録時にClaude Codeが起動し、自動で分類�
 - AI: Claude API (Sonnet 4.6) ※アプリ内チャットbot用
 - CI/CD: GitHub Actions
 - Email: SendGrid
-- Issue処理: Claude Code（GitHub Actions経由）
+- Issue巡回処理: Claude Code（GitHub Actions cron経由）
 
 ## ビルド・テスト
 
@@ -23,46 +40,71 @@ npm test         # vitest run
 npm run dev      # tsx watch（開発用）
 ```
 
-## Issue対応ルール
+## リポジトリ管理
 
-GitHub Actionsからissue内容を渡されたら、以下のルールに従って処理すること。
+### 新規リポジトリの追加方法
+repos.json の `repos` 配列にエントリを追加するだけ:
 
-### ステップ1: 分類
+```json
+{
+  "owner": "harukaze1216",
+  "name": "new-product",
+  "description": "新しいプロダクト",
+  "rules": {
+    "bugLabels": ["bug"],
+    "featureLabels": ["enhancement", "feature"],
+    "bugKeywords": ["動かない", "エラー", "できない", "表示されない", "落ちる", "クラッシュ"],
+    "featureKeywords": ["ほしい", "追加", "要望", "改善"]
+  }
+}
+```
 
-以下の条件でbug / feature / unknownを判定する。
+## Issue巡回処理ルール
+
+5分ごとにClaude Codeが起動し、repos.json の全リポジトリを巡回する。
+
+### 未処理判定
+`agent-processed` ラベルが付いていない open な issue が対象。
+
+### 分類ルール
 
 **Bug判定条件（いずれかに該当）:**
-- labelに `bug` が含まれる
-- 本文に「動かない」「エラー」「できない」「表示されない」「落ちる」「クラッシュ」が含まれる
+- labelに repos.json の `bugLabels` のいずれかが含まれる
+- タイトルまたは本文に `bugKeywords` のいずれかが含まれる
 
 **Feature判定条件（いずれかに該当）:**
-- labelに `enhancement` または `feature` が含まれる
-- 本文に「ほしい」「追加」「要望」「改善」が含まれる
+- labelに repos.json の `featureLabels` のいずれかが含まれる
+- タイトルまたは本文に `featureKeywords` のいずれかが含まれる
 
 **判断不能:** 上記のいずれにも該当しない場合
 
-### ステップ2: 対応
+### 対応フロー
 
 #### Bugの場合
-1. コードベースを調査し、原因箇所を特定する
+1. 対象リポジトリをcloneする
 2. `fix/issue-{番号}` ブランチを作成する
-3. 最小限の修正を行う（既存のコーディングスタイルに合わせる）
-4. `npm test` でテストを実行し、通過を確認する
-5. コミットしてプッシュする
-6. PRを作成する（タイトル: `fix: {issueタイトル} (#{番号})`、本文に `Closes #{番号}` を含める）
+3. コードベースを調査し、原因箇所を特定する
+4. 最小限の修正を行う（既存のコーディングスタイルに合わせる）
+5. テストがあれば実行し、通過を確認する
+6. コミットしてプッシュする
+7. PRを作成する（タイトル: `fix: {issueタイトル} (#{番号})`、本文に `Closes #{番号}` を含める）
+8. issueに `agent-processed` ラベルを付与する
 
 #### Featureの場合
-1. BACKLOG.mdのテーブルに以下を追記する:
-   - タイトル（issueタイトル）
-   - ユーザー（issueから取得できれば。不明なら `-`）
-   - 日時（今日の日付 YYYY-MM-DD）
-   - Issue番号（`#{番号}`）
+1. **このリポジトリ（codex-test）** の BACKLOG.md にテーブル行を追記する
+   - タイトル、ユーザー、日時、リポジトリ名＋Issue番号
 2. mainブランチにコミット＆プッシュする
-3. issueに `enhancement` ラベルを付与する
+3. 対象issueに `enhancement` ラベルを付与する
+4. issueに `agent-processed` ラベルを付与する
 
 #### 判断不能の場合
 1. issueに `needs-triage` ラベルを付与する
 2. issueにコメントで「自動分類ができなかったため、手動トリアージをお願いします」と残す
+3. issueに `agent-processed` ラベルを付与する
+
+### 二重処理防止
+- 処理済みissueには必ず `agent-processed` ラベルを付与する
+- 1回の実行で最大10件まで処理する
 
 ## コーディング規約
 
@@ -80,23 +122,27 @@ GitHub Actionsからissue内容を渡されたら、以下のルールに従っ�
 ## ディレクトリ構成
 
 ```
+repos.json                ← 管理対象リポジトリ一覧
+BACKLOG.md                ← 全リポジトリの機能要望一覧
+
 src/
-├── chatbot/          # ① AIチャットbot（Claude API）
-│   ├── index.ts      #    チャットAPIエンドポイント
-│   └── prompt.ts     #    システムプロンプト・FAQ
-├── feedback/         # ② フィードバック → GitHub Issue登録
-│   ├── routes.ts     #    フォーム送信APIエンドポイント
-│   └── github-issue.ts #  Issue作成ロジック
-├── webhook/          # ③ GitHub Webhook受信（ログ用）
-│   ├── routes.ts     #    Webhook受信・署名検証
-│   └── handler.ts    #    受信ログ記録
-├── notifications/    # ⑤ 通知
-│   ├── email.ts      #    SendGridメール送信
-│   └── slack.ts      #    Slack Webhook通知
-├── config.ts         #    環境変数バリデーション
-└── server.ts         #    Expressサーバーエントリーポイント
+├── chatbot/              # ① AIチャットbot（Claude API）
+│   ├── index.ts
+│   └── prompt.ts
+├── feedback/             # ② フィードバック → GitHub Issue登録
+│   ├── routes.ts
+│   └── github-issue.ts
+├── webhook/              # ③ GitHub Webhook受信（ログ用）
+│   ├── routes.ts
+│   └── handler.ts
+├── notifications/        # ⑤ 通知
+│   ├── email.ts
+│   └── slack.ts
+├── config.ts
+└── server.ts
 
 .github/workflows/
-├── auto-agent.yml    # issues.opened → Claude Code起動
-└── notify-on-close.yml # issues.closed → ユーザーメール通知
+├── poll-issues.yml       # cron → Claude Code巡回
+├── auto-agent.yml        # issues.opened → このリポジトリ用
+└── notify-on-close.yml   # issues.closed → ユーザーメール通知
 ```

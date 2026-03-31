@@ -1,0 +1,92 @@
+name: Poll Issues & Auto-Process
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"  # 5分ごと
+  workflow_dispatch:        # 手動実行もOK
+
+jobs:
+  poll-and-process:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Poll and process issues
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          claude -p "
+          あなたはGitHub Issueを巡回処理するAIエージェントです。
+          以下の手順で処理してください。
+
+          ## 手順
+
+          ### 1. repos.json を読む
+          repos.json に登録されたリポジトリ一覧を取得してください。
+
+          ### 2. 各リポジトリの未処理issueを取得
+          GitHub CLI (gh) を使って、各リポジトリから未処理のissueを取得してください。
+          未処理の判定: 'agent-processed' ラベルが付いていないopenなissue。
+
+          コマンド例:
+          gh issue list --repo {owner}/{name} --state open --json number,title,body,labels,url --limit 10
+
+          ### 3. issueごとに分類・処理
+          repos.json の各リポジトリの rules に従って分類してください。
+
+          #### Bug判定（いずれかに該当）:
+          - labelに bugLabels のいずれかが含まれる
+          - タイトルまたは本文に bugKeywords のいずれかが含まれる
+
+          #### Feature判定（いずれかに該当）:
+          - labelに featureLabels のいずれかが含まれる
+          - タイトルまたは本文に featureKeywords のいずれかが含まれる
+
+          #### 判断不能: 上記のいずれにも該当しない
+
+          ### 4. 分類結果に応じた対応
+
+          #### Bugの場合:
+          1. 対象リポジトリをcloneする: git clone https://x-access-token:\${GITHUB_TOKEN}@github.com/{owner}/{name}.git /tmp/{name}
+          2. /tmp/{name} で作業する
+          3. fix/issue-{番号} ブランチを作成
+          4. コードを調査し、最小限の修正を行う
+          5. テストがあれば実行して通過を確認
+          6. コミット＆プッシュ
+          7. gh pr create で PR作成（タイトル: 'fix: {issueタイトル} (#{番号})', 本文に 'Closes {owner}/{name}#{番号}' を含める）
+          8. 対象issueに 'agent-processed' ラベルを付与: gh issue edit {番号} --repo {owner}/{name} --add-label agent-processed
+
+          #### Featureの場合:
+          1. このリポジトリ（codex-test）の BACKLOG.md にテーブル行を追記:
+             | - | {issueタイトル} | - | {今日の日付 YYYY-MM-DD} | {owner}/{name}#{番号} |
+          2. 追記をコミット＆プッシュ
+          3. 対象リポジトリのissueに 'enhancement' ラベルを付与
+          4. 対象issueに 'agent-processed' ラベルを付与
+
+          #### 判断不能の場合:
+          1. 対象issueに 'needs-triage' ラベルを付与
+          2. issueにコメント: '自動分類ができなかったため、手動トリアージをお願いします'
+          3. 対象issueに 'agent-processed' ラベルを付与
+
+          ### 5. 未処理issueがなければ
+          '未処理のissueはありませんでした' と出力して終了。
+
+          ## 注意事項
+          - 必ず agent-processed ラベルを付けて二重処理を防ぐこと
+          - 1回の実行で最大10件まで処理すること
+          - エラーが出ても他のissueの処理は続行すること
+          " --allowedTools "Bash,Read,Write,Edit,Glob,Grep" --max-turns 50

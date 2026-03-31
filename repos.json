@@ -1,0 +1,20 @@
+{
+  "repos": [
+    {
+      "owner": "harukaze1216",
+      "name": "codex-test",
+      "description": "顧客対応自動化システム本体",
+      "rules": {
+        "bugLabels": ["bug"],
+        "featureLabels": ["enhancement", "feature"],
+        "bugKeywords": ["動かない", "エラー", "できない", "表示されない", "落ちる", "クラッシュ"],
+        "featureKeywords": ["ほしい", "追加", "要望", "改善"]
+      }
+    }
+  ],
+  "processedLabel": "agent-processed",
+  "settings": {
+    "pollIntervalMinutes": 5,
+    "maxIssuesPerRun": 10
+  }
+}
