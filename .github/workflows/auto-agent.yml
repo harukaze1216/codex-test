@@ -1,0 +1,59 @@
+name: Issue Auto-Agent
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  process-issue:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Process issue with AI agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO_NAME: ${{ github.event.repository.name }}
+          GITHUB_WEBHOOK_SECRET: "not-needed-for-actions"
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          NOTIFICATION_FROM_EMAIL: ${{ secrets.NOTIFICATION_FROM_EMAIL }}
+        run: |
+          node -e "
+            const { handleIssueOpened } = require('./dist/webhook/handler.js');
+            const config = {
+              ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+              GITHUB_TOKEN: process.env.GITHUB_TOKEN,
+              GITHUB_REPO_OWNER: process.env.GITHUB_REPO_OWNER,
+              GITHUB_REPO_NAME: process.env.GITHUB_REPO_NAME,
+              GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET,
+              SLACK_WEBHOOK_URL: process.env.SLACK_WEBHOOK_URL || '',
+              SENDGRID_API_KEY: process.env.SENDGRID_API_KEY || '',
+              NOTIFICATION_FROM_EMAIL: process.env.NOTIFICATION_FROM_EMAIL || '',
+              PORT: 3000
+            };
+            const issue = {
+              number: ${{ github.event.issue.number }},
+              title: $(echo '${{ github.event.issue.title }}' | jq -Rs .),
+              body: $(echo '${{ github.event.issue.body }}' | jq -Rs .),
+              labels: ${{ toJson(github.event.issue.labels) }},
+              html_url: '${{ github.event.issue.html_url }}'
+            };
+            handleIssueOpened(config, issue)
+              .then(() => console.log('Done'))
+              .catch(e => { console.error(e); process.exit(1); });
+          "

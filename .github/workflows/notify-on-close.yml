@@ -1,0 +1,41 @@
+name: Issue Close Notification
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    if: contains(github.event.issue.labels.*.name, 'user-feedback')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Send notification
+        env:
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          NOTIFICATION_FROM_EMAIL: ${{ secrets.NOTIFICATION_FROM_EMAIL }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          node -e "
+            // issueのbodyからユーザーIDを抽出し、
+            // ユーザーDBからメールアドレスを取得して通知する
+            // （実際のプロダクトに合わせて実装）
+            console.log('Issue #' + process.env.ISSUE_NUMBER + ' closed.');
+            console.log('Title: ' + process.env.ISSUE_TITLE);
+            console.log('Notification would be sent to the user.');
+          "
