@@ -1,66 +1,43 @@
 import { describe, it, expect, vi } from "vitest";
+import { handleIssueOpened } from "../src/webhook/handler.js";
 
-// classifyIssueのキーワードベース判定をテスト（AI呼び出しなし）
-vi.mock("@anthropic-ai/sdk", () => ({
-  default: vi.fn(),
-}));
+describe("handleIssueOpened", () => {
+  it("issueの受信ログを出力する", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-import { classifyIssue } from "../src/agents/orchestrator.js";
-
-const dummyConfig = {
-  ANTHROPIC_API_KEY: "test",
-  GITHUB_TOKEN: "test",
-  GITHUB_REPO_OWNER: "test",
-  GITHUB_REPO_NAME: "test",
-  GITHUB_WEBHOOK_SECRET: "test",
-  SENDGRID_API_KEY: "",
-  NOTIFICATION_FROM_EMAIL: "",
-  SLACK_WEBHOOK_URL: "",
-  PORT: 3000,
-};
-
-describe("classifyIssue", () => {
-  it("bugラベル付きissueをbugと判定する", async () => {
-    const result = await classifyIssue(dummyConfig, {
+    await handleIssueOpened({
       number: 1,
-      title: "テスト",
+      title: "テストissue",
       body: "テスト本文",
       labels: [{ name: "bug" }],
+      html_url: "https://github.com/test/test/issues/1",
     });
-    expect(result.type).toBe("bug");
-    expect(result.confidence).toBe(1.0);
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining("Issue #1 received")
+    );
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining("Claude Code")
+    );
+
+    spy.mockRestore();
   });
 
-  it("enhancementラベル付きissueをfeatureと判定する", async () => {
-    const result = await classifyIssue(dummyConfig, {
+  it("ラベルなしでも処理できる", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await handleIssueOpened({
       number: 2,
-      title: "新機能",
-      body: "新機能の要望",
-      labels: [{ name: "enhancement" }],
-    });
-    expect(result.type).toBe("feature");
-    expect(result.confidence).toBe(1.0);
-  });
-
-  it("バグキーワードを含むissueをbugと判定する", async () => {
-    const result = await classifyIssue(dummyConfig, {
-      number: 3,
-      title: "ボタンが動かない",
-      body: "クリックしても反応しない",
+      title: "ラベルなし",
+      body: null,
       labels: [],
+      html_url: "https://github.com/test/test/issues/2",
     });
-    expect(result.type).toBe("bug");
-    expect(result.confidence).toBe(0.8);
-  });
 
-  it("要望キーワードを含むissueをfeatureと判定する", async () => {
-    const result = await classifyIssue(dummyConfig, {
-      number: 4,
-      title: "ダークモードがほしい",
-      body: "目が疲れるので追加してほしい",
-      labels: [],
-    });
-    expect(result.type).toBe("feature");
-    expect(result.confidence).toBe(0.8);
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining("Labels: none")
+    );
+
+    spy.mockRestore();
   });
 });

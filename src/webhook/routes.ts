@@ -29,7 +29,7 @@ export function createWebhookRouter(config: Env): Router {
       // issues.opened イベントのみ処理
       if (event === "issues" && payload.action === "opened") {
         // 非同期で処理を開始（Webhookレスポンスは即返す）
-        handleIssueOpened(config, payload.issue).catch((error) => {
+        handleIssueOpened(payload.issue).catch((error) => {
           console.error("Issue handling error:", error);
         });
 

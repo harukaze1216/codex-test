@@ -1,4 +1,4 @@
-name: Issue Auto-Agent
+name: Issue Auto-Agent (Claude Code)
 
 on:
   issues:
@@ -7,6 +7,10 @@ on:
 jobs:
   process-issue:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,44 +20,42 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
 
-      - name: Build
-        run: npm run build
-
-      - name: Process issue with AI agent
+      - name: Process issue with Claude Code
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPO_OWNER: ${{ github.repository_owner }}
-          GITHUB_REPO_NAME: ${{ github.event.repository.name }}
-          GITHUB_WEBHOOK_SECRET: "not-needed-for-actions"
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
-          NOTIFICATION_FROM_EMAIL: ${{ secrets.NOTIFICATION_FROM_EMAIL }}
         run: |
-          node -e "
-            const { handleIssueOpened } = require('./dist/webhook/handler.js');
-            const config = {
-              ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-              GITHUB_TOKEN: process.env.GITHUB_TOKEN,
-              GITHUB_REPO_OWNER: process.env.GITHUB_REPO_OWNER,
-              GITHUB_REPO_NAME: process.env.GITHUB_REPO_NAME,
-              GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET,
-              SLACK_WEBHOOK_URL: process.env.SLACK_WEBHOOK_URL || '',
-              SENDGRID_API_KEY: process.env.SENDGRID_API_KEY || '',
-              NOTIFICATION_FROM_EMAIL: process.env.NOTIFICATION_FROM_EMAIL || '',
-              PORT: 3000
-            };
-            const issue = {
-              number: ${{ github.event.issue.number }},
-              title: $(echo '${{ github.event.issue.title }}' | jq -Rs .),
-              body: $(echo '${{ github.event.issue.body }}' | jq -Rs .),
-              labels: ${{ toJson(github.event.issue.labels) }},
-              html_url: '${{ github.event.issue.html_url }}'
-            };
-            handleIssueOpened(config, issue)
-              .then(() => console.log('Done'))
-              .catch(e => { console.error(e); process.exit(1); });
-          "
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          ISSUE_TITLE="${{ github.event.issue.title }}"
+          ISSUE_BODY=$(cat <<'ISSUE_EOF'
+          ${{ github.event.issue.body }}
+          ISSUE_EOF
+          )
+          ISSUE_LABELS='${{ toJson(github.event.issue.labels.*.name) }}'
+
+          claude -p "
+          以下のGitHub Issueを処理してください。CLAUDE.mdのIssue対応ルールに従ってください。
+
+          ## Issue #${ISSUE_NUMBER}
+          **タイトル:** ${ISSUE_TITLE}
+          **ラベル:** ${ISSUE_LABELS}
+          **本文:**
+          ${ISSUE_BODY}
+
+          ## 指示
+          1. issueの内容を分析し、bug / feature / unknown に分類してください
+          2. bugの場合:
+             - 影響範囲を調査
+             - fix/issue-${ISSUE_NUMBER} ブランチを作成
+             - コードを修正
+             - コミット＆プッシュ
+             - PRを作成（タイトル: 'fix: ${ISSUE_TITLE} (#${ISSUE_NUMBER})', Closes #${ISSUE_NUMBER} を本文に含める）
+          3. featureの場合:
+             - BACKLOG.md に要望を追記してコミット＆プッシュ
+             - issue に enhancement ラベルを付与
+          4. 判断できない場合:
+             - issue に needs-triage ラベルを付与
+          " --allowedTools "Bash,Read,Write,Edit,Glob,Grep" --max-turns 30
