@@ -1,0 +1,61 @@
+name: Issue Auto-Agent (Claude Code)
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  process-issue:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Process issue with Claude Code
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          ISSUE_TITLE="${{ github.event.issue.title }}"
+          ISSUE_BODY=$(cat <<'ISSUE_EOF'
+          ${{ github.event.issue.body }}
+          ISSUE_EOF
+          )
+          ISSUE_LABELS='${{ toJson(github.event.issue.labels.*.name) }}'
+
+          claude -p "
+          以下のGitHub Issueを処理してください。CLAUDE.mdのIssue対応ルールに従ってください。
+
+          ## Issue #${ISSUE_NUMBER}
+          **タイトル:** ${ISSUE_TITLE}
+          **ラベル:** ${ISSUE_LABELS}
+          **本文:**
+          ${ISSUE_BODY}
+
+          ## 指示
+          1. issueの内容を分析し、bug / feature / unknown に分類してください
+          2. bugの場合:
+             - 影響範囲を調査
+             - fix/issue-${ISSUE_NUMBER} ブランチを作成
+             - コードを修正
+             - コミット＆プッシュ
+             - PRを作成（タイトル: 'fix: ${ISSUE_TITLE} (#${ISSUE_NUMBER})', Closes #${ISSUE_NUMBER} を本文に含める）
+          3. featureの場合:
+             - BACKLOG.md に要望を追記してコミット＆プッシュ
+             - issue に enhancement ラベルを付与
+          4. 判断できない場合:
+             - issue に needs-triage ラベルを付与
+          " --allowedTools "Bash,Read,Write,Edit,Glob,Grep" --max-turns 30
